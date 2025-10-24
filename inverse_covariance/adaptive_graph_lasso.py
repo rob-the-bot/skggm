@@ -92,7 +92,7 @@ class AdaptiveGraphicalLasso(BaseEstimator):
         self.estimator_ = None
 
         X = check_array(X, ensure_min_features=2, estimator=self)
-        X = as_float_array(X, copy=False, force_all_finite=False)
+        X = as_float_array(X, copy=False, ensure_all_finite=False)
 
         n_samples_, n_features_ = X.shape
         
