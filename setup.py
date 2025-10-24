@@ -32,6 +32,36 @@ is_x86 = any(x in machine for x in ("x86_64", "amd64", "x86-64"))
 
 want_avx2 = os.environ.get("SKGGM_AVX2", "").strip() == "1"
 want_native = os.environ.get("SKGGM_NATIVE", "").strip() == "1"
+def find_mkl_on_windows():
+    """
+    Attempt to locate MKL on Windows.
+
+    Detection order:
+      1) Conda/Mamba env: %CONDA_PREFIX%/Library/{include,lib}/mkl_rt.lib
+      2) OneAPI MKL: %MKLROOT%/{include, lib/intel64}/mkl_rt.lib
+
+    Returns (include_dirs, library_dirs, libraries) or None if not found.
+    """
+    # Check conda/mamba environment first
+    for env_var in ("CONDA_PREFIX", "MAMBA_PREFIX"):
+        prefix = os.environ.get(env_var)
+        if prefix:
+            inc = os.path.join(prefix, "Library", "include")
+            lib = os.path.join(prefix, "Library", "lib")
+            if os.path.exists(os.path.join(lib, "mkl_rt.lib")):
+                return [inc], [lib], ["mkl_rt"]
+
+    # Check Intel oneAPI MKL installation
+    mklroot = os.environ.get("MKLROOT")
+    if mklroot:
+        inc = os.path.join(mklroot, "include")
+        lib = os.path.join(mklroot, "lib", "intel64")
+        if os.path.exists(os.path.join(lib, "mkl_rt.lib")):
+            return [inc], [lib], ["mkl_rt"]
+
+    return None
+
+
 
 include_dirs = [np.get_include()]
 extra_compile_args = []
@@ -47,13 +77,24 @@ if system == 'Darwin':
     extra_link_args += ['-Wl,-framework', '-Wl,Accelerate']
 
 elif system == 'Windows':
-    # Windows (MSVC): link MKL via libraries/library_dirs
+    # Require MKL on Windows; fail fast if not found
     extra_compile_args += ['/O2']
-    conda_prefix = os.environ.get('CONDA_PREFIX') or os.environ.get('MAMBA_PREFIX')
-    if conda_prefix:
-        include_dirs += [os.path.join(conda_prefix, 'Library', 'include')]
-        library_dirs += [os.path.join(conda_prefix, 'Library', 'lib')]
-    libraries += ['mkl_rt']
+    found = find_mkl_on_windows()
+    if not found:
+        raise SystemExit(
+            "\n[skggm] MKL not detected on Windows.\n"
+            "To fix, do one of the following, then re-run installation:\n"
+            "  - Conda-forge:\n"
+            "      conda install -c conda-forge mkl mkl-devel intel-openmp\n"
+            "  - Intel oneAPI MKL: install and set MKLROOT, e.g.:\n"
+            "      setx MKLROOT \"C:\\Program Files (x86)\\Intel\\oneAPI\\mkl\\latest\"\n"
+            "\nIf you intentionally do not want MKL on Windows, update setup.py to use a different BLAS/LAPACK.\n"
+        )
+    incs, libs_dir, libs = found
+    include_dirs += incs
+    library_dirs += libs_dir
+    libraries += libs
+
 else:
     # Linux and other Unix
     include_dirs += ['/usr/local/include']
